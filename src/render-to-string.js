@@ -82,7 +82,7 @@ const VOID_ELEMENTS = new Set([
 
 const EMPTY_OBJECT = Object.freeze({})
 
-function renderToString(element, context = {}) {
+async function renderToString(element, context = {}) {
   // TODO nullify and only allow in functional components
   dispatcher.context = context
 
@@ -93,13 +93,9 @@ function renderToString(element, context = {}) {
   } else if (typeof element === 'boolean' || element == null) {
     return ''
   } else if (Array.isArray(element)) {
-    let html = ''
-
-    for (let i = 0, len = element.length; i < len; i++) {
-      html += renderToString(element[i], context)
-    }
-
-    return html
+    return (await Promise.all(element.map(e => renderToString(e, context)))).join("")
+  } else if (element instanceof Promise) {
+    element = await element
   }
 
   const type = element.type
@@ -109,25 +105,15 @@ function renderToString(element, context = {}) {
 
     if (type.contextRef) {
       context = Object.assign({}, context, { [type.contextRef.id]: props.value })
-      return renderToString(type(props), context)
-    }
-
-    if (type.prototype && type.prototype.render) {
-      const instance = new type(props)
-
-      if (type.contextType) {
-        instance.context = type.contextType.getChildContext(context)
-      }
-
-      return renderToString(instance.render(), context)
+      return await renderToString(type(props), context)
     }
 
     if (typeof type === 'function') {
-      return renderToString(type(props), context)
+      return await renderToString(type(props), context)
     }
 
     if (type === Fragment) {
-      return renderToString(props.children, context)
+      return await renderToString(props.children, context)
     }
 
     if (typeof type === 'string') {
@@ -171,7 +157,7 @@ function renderToString(element, context = {}) {
         if (innerHTML) {
           html += innerHTML
         } else {
-          html += renderToString(props.children, context)
+          html += await renderToString(props.children, context)
         }
 
         html += `</${type}>`
