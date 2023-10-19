@@ -105,7 +105,13 @@ async function renderToString(element, context = {}) {
 
     if (type.contextRef) {
       context = Object.assign({}, context, { [type.contextRef.id]: props.value })
-      return await renderToString(type(props), context)
+      if (type.contextRef.id === 'errorBoundary') {
+        try {
+          return await renderToString(type(props), context)
+        } catch (e) {
+          return await renderToString(context['errorBoundary'](e), context)
+        }
+      }
     }
 
     if (typeof type === 'function') {
