@@ -82,20 +82,22 @@ const VOID_ELEMENTS = new Set([
 
 const EMPTY_OBJECT = Object.freeze({})
 
-async function renderToString(element, context = {}) {
+function renderToString(element, context = {}, controller) {
   // TODO nullify and only allow in functional components
   dispatcher.context = context
 
   if (typeof element === 'string') {
-    return escapeString(element)
+    return controller.content.push(escapeString(element))
   } else if (typeof element === 'number') {
-    return String(element)
+    return controller.content.push(String(element))
   } else if (typeof element === 'boolean' || element == null) {
-    return ''
+    return
   } else if (Array.isArray(element)) {
-    return (await Promise.all(element.map(e => renderToString(e, context)))).join("")
+    return controller.content
+      .push(element.map((e) => renderToString(e, context, controller)))
+      .join('')
   } else if (element instanceof Promise) {
-    element = await element
+    return controller.handleAsync(element, context, controller)
   }
 
   const type = element.type
@@ -107,19 +109,21 @@ async function renderToString(element, context = {}) {
       context = Object.assign({}, context, { [type.contextRef.id]: props.value })
       if (type.contextRef.id === 'errorBoundary') {
         try {
-          return await renderToString(type(props), context)
+          return controller.content.push(renderToString(type(props), context, controller))
         } catch (e) {
-          return await renderToString(context['errorBoundary'](e), context)
+          return controller.content.push(
+            renderToString(context['errorBoundary'](e), context, controller)
+          )
         }
       }
     }
 
     if (typeof type === 'function') {
-      return await renderToString(type(props), context)
+      return renderToString(type(props), context, controller)
     }
 
     if (type === Fragment) {
-      return await renderToString(props.children, context)
+      return renderToString(props.children, context, controller)
     }
 
     if (typeof type === 'string') {
@@ -157,21 +161,63 @@ async function renderToString(element, context = {}) {
 
       if (VOID_ELEMENTS.has(type)) {
         html += '/>'
+        return controller.content.push(html)
       } else {
         html += '>'
 
         if (innerHTML) {
           html += innerHTML
+          controller.content.push(html)
         } else {
-          html += await renderToString(props.children, context)
+          controller.content.push(html)
+          renderToString(props.children, context, controller)
         }
 
-        html += `</${type}>`
+        controller.content.push(`</${type}>`)
       }
 
-      return html
+      return
     }
   }
 }
 
-export default renderToString
+function makeController() {
+  const content = []
+
+  const controller = {
+    content,
+    hasAsync: false,
+    handleAsync(promise, context, controller) {
+      this.hasAsync = true
+      content.push({ promise, context, controller })
+    }
+  }
+
+  return controller
+}
+async function renderController(controller) {
+  if (controller.hasAsync) {
+    return (
+      await Promise.all(
+        controller.content.map(async (item) => {
+          if (item == null) return ''
+          if (typeof item === 'string') return item
+          const controller = makeController()
+          const element = await item.promise
+          renderToString(element, item.context, controller)
+          return await renderController(controller)
+        })
+      )
+    ).join('')
+  } else {
+    return controller.content.join('')
+  }
+}
+
+async function render(element) {
+  const controller = makeController()
+  renderToString(element, {}, controller)
+  return await renderController(controller)
+}
+
+export default render
